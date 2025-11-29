@@ -1,0 +1,275 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  LayoutDashboard, 
+  LogOut, 
+  MapPin, 
+  Clock, 
+  DollarSign, 
+  Trash2, 
+  Phone, 
+  Car, 
+  CreditCard, 
+  Banknote,
+  RefreshCw
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  deleteDoc, 
+  doc 
+} from 'firebase/firestore';
+
+// --- Reuse your existing Firebase Config here ---
+const firebaseConfig = JSON.parse(__firebase_config); // Or paste your config object here
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'mpower-towing';
+
+export default function DispatchDashboard() {
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [quotes, setQuotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ count: 0, revenue: 0 });
+
+  // --- Auth & Data Listener ---
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        // Real-time listener for quotes
+        const q = query(
+          collection(db, 'artifacts', appId, 'public', 'data', 'quotes'), 
+          orderBy('createdAt', 'desc')
+        );
+        
+        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+          const quotesData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setQuotes(quotesData);
+          
+          // Calculate Daily Stats
+          const today = new Date().toDateString();
+          const todaysQuotes = quotesData.filter(q => 
+            q.createdAt?.toDate().toDateString() === today
+          );
+          
+          setStats({
+            count: todaysQuotes.length,
+            revenue: todaysQuotes.reduce((acc, curr) => acc + (curr.totals?.total || 0), 0)
+          });
+          
+          setLoading(false);
+        });
+        
+        return () => unsubscribeSnapshot();
+      } else {
+        setQuotes([]);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // --- Actions ---
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      alert("Login Failed: " + error.message);
+    }
+  };
+
+  const handleLogout = () => signOut(auth);
+
+  const handleArchive = async (id) => {
+    if(window.confirm("Archive this job? It will be removed from the board.")){
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quotes', id));
+    }
+  };
+
+  // --- Helpers ---
+  const formatTime = (timestamp) => {
+    if (!timestamp) return 'Just now';
+    return timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // --- Render Login ---
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="bg-amber-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4">
+              <LayoutDashboard className="text-amber-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800">Dispatch Login</h2>
+            <p className="text-sm text-gray-500">Authorized personnel only.</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input 
+              type="email" 
+              placeholder="Admin Email"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+            />
+            <input 
+              type="password" 
+              placeholder="Password"
+              className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
+            <button className="w-full bg-amber-600 text-white font-bold py-3 rounded-lg hover:bg-amber-700">
+              Access Dashboard
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Render Dashboard ---
+  return (
+    <div className="min-h-screen bg-gray-100">
+      {/* Navbar */}
+      <nav className="bg-gray-900 text-white px-6 py-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
+        <div className="flex items-center gap-3">
+          <LayoutDashboard className="text-amber-500" />
+          <h1 className="font-bold text-lg tracking-wide">MPOWER <span className="text-gray-400 font-normal">Dispatch</span></h1>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-400 hidden sm:inline">{user.email}</span>
+          <button 
+            onClick={handleLogout}
+            className="bg-gray-800 hover:bg-gray-700 p-2 rounded-lg transition"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </nav>
+
+      {/* Stats Bar */}
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+           <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-amber-500">
+              <div className="text-xs text-gray-500 font-bold uppercase">Active Jobs</div>
+              <div className="text-2xl font-black text-gray-800">{quotes.length}</div>
+           </div>
+           <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-green-500">
+              <div className="text-xs text-gray-500 font-bold uppercase">Today's Est. Revenue</div>
+              <div className="text-2xl font-black text-gray-800">${stats.revenue.toFixed(2)}</div>
+           </div>
+        </div>
+
+        {/* Job List */}
+        {loading ? (
+           <div className="flex justify-center pt-20 text-gray-400 gap-2">
+             <RefreshCw className="animate-spin" /> Loading feeds...
+           </div>
+        ) : quotes.length === 0 ? (
+           <div className="text-center pt-20 text-gray-400">
+              <div className="bg-gray-200 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                 <LayoutDashboard className="text-gray-400" />
+              </div>
+              <p>No active jobs on the board.</p>
+           </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {quotes.map((job) => (
+              <div key={job.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition">
+                
+                {/* Card Header */}
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-lg text-gray-900">{job.customer.name}</span>
+                      <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded font-bold">
+                        {job.invoiceNum}
+                      </span>
+                    </div>
+                    <a href={`tel:${job.customer.phone}`} className="text-amber-600 text-sm font-semibold hover:underline flex items-center gap-1 mt-1">
+                      <Phone className="w-3 h-3" /> {job.customer.phone}
+                    </a>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-xl text-gray-900">${job.totals.total.toFixed(2)}</div>
+                    <div className={`text-xs font-bold uppercase flex items-center justify-end gap-1 ${job.paymentType === 'cash' ? 'text-green-600' : 'text-amber-600'}`}>
+                       {job.paymentType === 'cash' ? <Banknote className="w-3 h-3"/> : <CreditCard className="w-3 h-3"/>}
+                       {job.paymentType}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Body */}
+                <div className="p-6 space-y-4">
+                  
+                  {/* Vehicle */}
+                  <div className="flex items-start gap-3">
+                    <Car className="w-5 h-5 text-gray-400 mt-0.5" />
+                    <div>
+                      <div className="font-bold text-gray-800">{job.vehicle.ymm}</div>
+                      <div className="text-xs text-gray-400 font-mono">VIN: {job.vehicle.vin || 'N/A'} • Plate: {job.vehicle.plate || 'N/A'}</div>
+                    </div>
+                  </div>
+
+                  {/* Route */}
+                  <div className="flex items-start gap-3">
+                    <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
+                    <div className="w-full space-y-2">
+                       <div className="text-sm">
+                          <span className="text-xs text-gray-400 uppercase font-bold block">Pickup</span>
+                          {job.service.pickup}
+                       </div>
+                       <div className="text-sm border-t border-dashed pt-2">
+                          <span className="text-xs text-gray-400 uppercase font-bold block">Drop-off</span>
+                          {job.service.dropoff}
+                       </div>
+                       <div className="bg-gray-50 rounded p-2 text-xs text-gray-500 font-medium flex gap-4">
+                          <span>Dist: {job.service.miles} mi</span>
+                          <span>Winching: {job.service.winching ? 'Yes' : 'No'}</span>
+                       </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Card Footer */}
+                <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
+                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                    <Clock className="w-3 h-3" />
+                    {job.createdAt ? formatTime(job.createdAt) : 'Unknown'}
+                  </div>
+                  <button 
+                    onClick={() => handleArchive(job.id)}
+                    className="text-gray-400 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-2"
+                  >
+                    <Trash2 className="w-3 h-3" /> Archive
+                  </button>
+                </div>
+
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
